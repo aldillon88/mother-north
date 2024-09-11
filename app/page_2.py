@@ -133,7 +133,8 @@ st.markdown("""
 	Now that the supplementary data has been appended, we can see the full route represented in the scatter plot below.
 	""")
 
-df = load_data("../data/clean/complete.csv")[["timestamp", "longitude_deg", "latitude_deg"]]
+#df = load_data("../data/clean/complete.csv")[["timestamp", "longitude_deg", "latitude_deg"]] # for local development
+df = load_data("data/clean/complete.csv")[["timestamp", "longitude_deg", "latitude_deg"]]
 df.timestamp = pd.to_datetime(df.timestamp)
 cut_off_value = pd.to_datetime("2024-08-14 11:03:02")
 df["data_source"] = np.where(df.timestamp <= cut_off_value, 0, 1)
