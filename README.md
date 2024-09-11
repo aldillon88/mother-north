@@ -31,15 +31,5 @@ The end result is an interactive dashboard that allows the user to analyse the d
 	2. `source [venv-name]/bin/activate`.
 3. Install the required packages:
 	1. `pip install -r requirements.txt`.
-4. Setup Git Large File Storage and track kaleido:
-	1. `git lfs install`
-	2. `git lfs track "venv-final-project/lib/python3.9/site-packages/kaleido/executable/bin/kaleido"`
-	3. `git add .gitattributes`
-	4. `git commit -m "Track large file with Git LFS"`
-5. Push changes to the repository:
-	1. `git rm --cached venv-final-project/lib/python3.9/site-packages/kaleido/executable/bin/kaleido`
-	2. `git add venv-final-project/lib/python3.9/site-packages/kaleido/executable/bin/kaleido`
-	3. `git commit -m "Add large file to LFS"`
-	4. `git push origin main --force`
-6. Run the Streamlit app:
+4. Run the Streamlit app:
 	1. `streamlit run app.py`
