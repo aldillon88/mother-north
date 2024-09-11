@@ -13,8 +13,8 @@ if project_root not in sys.path:
 
 from functions import *
 
-
-df = load_data("../data/clean/complete.csv")
+#df = load_data("../data/clean/complete.csv") # for local development
+df = load_data("data/clean/complete.csv")
 df.timestamp = pd.to_datetime(df.timestamp)
 
 days = {
