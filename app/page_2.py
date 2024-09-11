@@ -201,7 +201,7 @@ st.code("""
 st.divider()
 st.header("Machine Learning")
 st.markdown("""
-	This next section will use machine learning to predict heart rate, power and cadence for the rows where such data is missing. In the process of doing so, we will add another columns called "pedalling", 
+	This next section will use machine learning to predict heart rate, power and cadence for the rows where such data is missing. In the process of doing so, we will add another column called "pedalling", 
 	which will indicate whether I was pedalling or not at any given point. The value of this will become clear in the relevant section below.\n
 	I decided to use XGBoost for the regression problems below, as I have had good results using it in the past. XGBoost (Extreme Gradient Boosting) is a powerful, efficient machine learning algorithm based on gradient boosting for decision trees. 
 	It is widely used for both regression and classification tasks due to its speed, performance, and ability to handle missing data. 
@@ -233,7 +233,7 @@ st.markdown("""
 	After checking the correlation values between the target column (`heart_rate`) and the feature columns, I experimented with various feature combinations and hyperparameters, 
 	achieving varying degrees of success. Models such as the XGBRegressor from XGBoost provide `feature_importances_` that give further insight into how individual features contribute 
 	to the predictions, which also helped to narrow down the final set of features. In addition, some of the correlations between heart rate and some columns appeared to be polynomial, 
-	so i experimented with PolynomialFeatures from scikit-learn, which resulted in a better performing model.
+	so I experimented with PolynomialFeatures from scikit-learn, which resulted in a better performing model.
 	""")
 st.code("""
 	feature_cols = [
@@ -254,13 +254,13 @@ st.code("""
 
 	heart_rate_poly = PolynomialFeatures(degree=2, interaction_only=True, include_bias=False)
 	heart_rate_poly.fit(X_train)
-	X_train_int = heart_rate_poly.transform(X_train)
-	X_test_int = heart_rate_poly.transform(X_test)
+	X_train_poly = heart_rate_poly.transform(X_train)
+	X_test_poly = heart_rate_poly.transform(X_test)
 
 	heart_rate_scaler = StandardScaler()
-	heart_rate_scaler.fit(X_train_int)
-	X_train_scaled = heart_rate_scaler.transform(X_train_int)
-	X_test_scaled = heart_rate_scaler.transform(X_test_int)
+	heart_rate_scaler.fit(X_train_poly)
+	X_train_scaled = heart_rate_scaler.transform(X_train_poly)
+	X_test_scaled = heart_rate_scaler.transform(X_test_poly)
 
 	heart_rate_xgb = XGBRegressor(
 		learning_rate=0.1, # 0.2
@@ -277,12 +277,187 @@ st.markdown("""
 	- Mean Absolute Error (MAE) of 1.15
 	- R2 Score for the training set of 0.998
 	- R2 Score for the test set of 0.985\n
-	The Max Error was 28.5, which indicates that the model performed poorly when predicting over some outlier values. However, I am happy with the overall performance for this project.
+	The Max Error was 28.5, which indicates that the model performed poorly when predicting over some outlier values. However, I am happy with the overall performance for this project. 
+	So we can move on to the next step, which is predicting cadence.
 	""")
 
+st.subheader("Predicting Cadence")
+st.markdown("""
+	Cadence during cycling can be very irregular due to factors like grade, fatigue, wind etc.. For example, when the grade is steep and negative, a cyclist may not pedal at all and instead allow 
+	gravity to get them down the hill. For this reason, I decided to add a new column to the dataset to indicate whether I was pedalling or not. This is straightforward for the rows where cadence 
+	and power are known, because if cadence and / or power is above 0 I was clearly pedalling at the time. Using this information, I could then predict whether or not I was pedalling 
+	for the rows where cadence and power is unknown. I could then use this to predict cadence only for points where I was likely pedalling.
+	""")
+st.code("""
+	# Create a new categorical columns where 1 means the rider is pedaling, 0 means they are not and -1 means unknown
+	df["pedalling"] = np.where(df.cadence > 0, 1, np.where(df.cadence.isna(), -1, 0))
 
+	# Select numerical dtypes
+	training_data = df.select_dtypes('number').dropna().copy()
+	training_data = training_data.loc[df.pedalling != -1]
 
+	# Split the data into target and features
+	target = training_data.pedalling
+	features = training_data.drop(columns=["pedalling", "power", "cadence"])
 
+	# Create the train and test sets
+	X_train, X_test, y_train, y_test = train_test_split(features, target, test_size=0.20, random_state=0)
+
+	# Scale the features
+	pedalling_scaler = StandardScaler()
+	pedalling_scaler.fit(X_train)
+	X_train_scaled = pedalling_scaler.transform(X_train)
+	X_test_scaled = pedalling_scaler.transform(X_test)
+
+	# Initiate the classification model
+	pedalling_clf = LogisticRegression(max_iter=200)
+	pedalling_clf.fit(X_train_scaled, y_train)
+	pred = pedalling_clf.predict(X_test_scaled)
+	""")
+st.markdown("""
+	The results of this model are below and are satisfactory for this project, so we can now move on to predicting the actual cadence values:
+	- Accuracy Score: 0.923
+	- Precision Score: 0.934
+	- Recall Score: 0.983\n
+	After taking a closer look at the distribution of cadence values, I realised that some of them were clearly wrong. This can happen when sensors malfunction. For this reason I decided 
+	to replace the outliers with `np.nan` so they can be predicted again once the model is trained.
+	""")
+st.code("""
+	# Create a function that returns outliers for any given numerical column
+	def locate_outliers(df, col):
+		Q1 = df[col].quantile(0.25)
+		Q3 = df[col].quantile(0.75)
+		IQR = Q3 - Q1
+		upper_bound = Q3 + IQR * 1.5
+		lower_bound = Q1 - IQR * 1.5
+		upper_outliers = df.loc[df[col] > upper_bound]
+		lower_outliers = df.loc[df[col] < lower_bound]
+		return upper_bound, lower_bound, upper_outliers, lower_outliers
+
+	# Filter the dataframe by 'pedalling'
+	pedalling_subset = df.loc[df.pedalling == 1].dropna(subset="cadence").copy()
+
+	# Calculate outliers and create a list of their respective indexes
+	upper_bound, lower_bound, upper_outliers, lower_outliers = locate_outliers(pedalling_subset, "cadence")
+	indexes_to_modify = lower_outliers.index.append(upper_outliers.index)
+
+	# Replace values in the 'cadence' column with NaN at the given indexes
+	df.loc[indexes_to_modify, 'cadence'] = np.nan
+	""")
+st.markdown("""
+	Even with the outliers removed, cadence numbers can be erratic, so I decided to train the model on smoothed cadence data instead. The scores for this model are as follows:
+	- Mean Absolute Error: 2.355
+	- R2 Score: 0.943
+	""")
+st.code("""
+	# Prepare training data for cadence predictions
+	training_data = df.loc[df.pedalling == 1].dropna().copy()
+	training_data["cadence_smoothed"] = training_data.cadence.rolling(10).mean().dropna()
+	training_data = training_data.dropna().copy()
+
+	feature_cols = [
+		'distance',
+		'altitude',
+		'speed',
+		'grade',
+		'vertical_speed',
+		'heart_rate',
+		'temperature',
+		'rolling_mean_10_speed',
+		'rolling_mean_10_grade',
+		'rolling_mean_10_vertical_speed',
+		'rolling_mean_5_vertical_speed',
+		'rolling_10_heart_rate'
+	]
+
+	target = training_data["cadence_smoothed"]
+	features = training_data[feature_cols]
+
+	X_train, X_test, y_train, y_test = train_test_split(features, target, test_size=0.20, random_state=0)
+
+	cadence_scaler = StandardScaler()
+	cadence_scaler.fit(X_train)
+	X_train_scaled = cadence_scaler.transform(X_train)
+	X_test_scaled = cadence_scaler.transform(X_test)
+
+	cadence_xgb = XGBRegressor(
+		eval_metric='mae',
+		n_estimators=1700,
+		max_depth=16,
+		learning_rate=0.1,
+		subsample=0.6,
+		reg_lambda=55,
+		reg_alpha=20
+	)
+	cadence_xgb.fit(X_train_scaled, y_train)
+	cadence_pred = cadence_xgb.predict(X_test_scaled)
+	""")
+
+st.subheader("Predicting Power")
+st.markdown("""
+	Finally, with `heart_rate` and `cadence` predicted, we can predict the final column - `power`. 
+	Once again, you can see that I used XGBRegressor for this task and once again decided to train the model on smoothed data. 
+	The model below achieved the following scores:
+	- Mean Absolute Error: 6.578
+	- R2 Score: 0.951
+	""")
+st.code("""
+	# Prepare training data for cadence predictions
+	training_data = df.loc[df.pedalling == 1].dropna().copy()
+	training_data["power_smoothed"] = training_data.power.rolling(10).mean()
+
+	training_data = training_data.dropna().copy()
+
+	feature_cols = [
+		'distance',
+		'altitude',
+		'speed',
+		'grade',
+		'vertical_speed',
+		'cadence',
+		'heart_rate',
+		'rolling_mean_10_speed',
+		'rolling_mean_10_grade',
+		'rolling_10_heart_rate'
+	]
+
+	#training_data = df.loc[df.pedalling == 1].dropna()
+	target = training_data["power_smoothed"]
+	features = training_data[feature_cols]
+
+	X_train, X_test, y_train, y_test = train_test_split(features, target, test_size=0.20, random_state=0)
+
+	power_scaler = StandardScaler()
+	power_scaler.fit(X_train)
+	X_train_scaled = power_scaler.transform(X_train)
+	X_test_scaled = power_scaler.transform(X_test)
+
+	power_xgb = XGBRegressor(
+		eval_metric='mae',
+		n_estimators=1700,
+		max_depth=15,
+		learning_rate=0.07,
+		subsample=0.6,
+		reg_lambda=55, #L2
+		reg_alpha=20 #L1
+	)
+	power_xgb.fit(X_train_scaled, y_train)
+	power_pred = power_xgb.predict(X_test_scaled)
+	""")
+st.markdown("""
+	Now with a full dataset, I was able to build the dashboard in this Streamlit app to analyse the race. The final dataframe could also be exported as a .gpx file and uploaded to platforms 
+	like Strava.
+	""")
+st.divider()
+st.header("Final Thoughts")
+st.markdown("""
+	This project description does not include all of the code written to complete the project. However, it does include the most important snippets to give an indication of the process 
+	that I followed. There was a lot of trial and error as I tried to build more performant models, some of which could probably have been avoided if I had spent more time cleaning and exploring 
+	the data prior to building the models.\n
+	Most of the rows were separated by 1 second time increments, with the occasional larger gap due to rest periods during the race or disconnected sensors / GPS. If I were to do this project again, 
+	I would experiement with resampling the data to equal but larger time increments, for example, 3 or 5 seconds using the mean value across that window. This might smooth the data and 
+	make it easier to work with when building the ML models.
+	""")
 
 
 
